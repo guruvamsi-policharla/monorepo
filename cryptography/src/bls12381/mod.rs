@@ -9,6 +9,7 @@
 pub mod certificate;
 #[cfg(feature = "std")]
 pub mod dkg;
+pub mod hints;
 pub mod primitives;
 mod scheme;
 pub mod tle;
