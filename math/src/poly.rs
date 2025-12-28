@@ -145,6 +145,27 @@ impl<K> Poly<K> {
         };
         K::msm(&self.coeffs, &weights, 1)
     }
+
+    /// Create a polynomial from its coefficients.
+    pub fn from_coeffs(coeffs: NonEmptyVec<K>) -> Self {
+        Self { coeffs }
+    }
+
+    /// Multiply two polynomials together.
+    pub fn poly_mul(&self, rhs: &Self) -> Self
+    where
+        K: Additive,
+        for<'a> K: Mul<&'a K, Output = K>,
+    {
+        let degree = self.degree() + rhs.degree();
+        let mut coeffs = vec![K::zero(); (degree + 1) as usize];
+        for (i, a_i) in self.coeffs.iter().enumerate() {
+            for (j, b_j) in rhs.coeffs.iter().enumerate() {
+                coeffs[i + j] += &(a_i.clone() * b_j);
+            }
+        }
+        Self::from_iter_unchecked(coeffs)
+    }
 }
 
 impl<K: Debug> Debug for Poly<K> {

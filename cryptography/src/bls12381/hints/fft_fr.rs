@@ -41,7 +41,7 @@ mod tests {
 
         let settings = Settings::new(size).unwrap();
 
-        let data = (0..settings.max_width)
+        let data = (0..1 << size)
             .map(|i| Scalar::from_u64_arr(&[i as u64, 0, 0, 0]))
             .collect::<Vec<_>>();
 
@@ -59,5 +59,33 @@ mod tests {
     #[test]
     fn compare_sft_fft_() {
         compare_sft_fft(&fft_fr_slow);
+    }
+
+    #[test]
+    fn fft_test() {
+        let size: usize = 4;
+
+        let settings = Settings::new(size).unwrap();
+
+        println!("roots_of_unity: {:?}", settings.roots_of_unity);
+        println!(
+            "expanded_roots_of_unity: {:?}",
+            settings.expanded_roots_of_unity
+        );
+        println!(
+            "reverse_roots_of_unity: {:?}",
+            settings.reverse_roots_of_unity
+        );
+        // let data = (0..1 << size)
+        //     .map(|i| Scalar::from_u64_arr(&[i as u64, 0, 0, 0]))
+        //     .collect::<Vec<_>>();
+
+        // let mut out0 = vec![Scalar::zero(); settings.max_width];
+
+        // // Compare fast and slow FFT approach
+        // fft_fr_slow(&mut out0, &data, 1, &settings.expanded_roots_of_unity, 1);
+        // let out1 = settings.fft(&data, false).unwrap();
+
+        // println!("out1: {:?}", out1);
     }
 }

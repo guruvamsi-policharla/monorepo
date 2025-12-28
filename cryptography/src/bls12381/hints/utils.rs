@@ -1,79 +1,52 @@
-use commonware_math::algebra::Additive;
+use std::ops::Mul;
+
+use crate::bls12381::hints::fft_settings::Settings;
+use crate::bls12381::primitives::group::{Scalar, G1};
+use commonware_math::algebra::{Additive, Field, Ring};
 use commonware_math::poly::Poly;
-
-use crate::bls12381::primitives::group::Scalar;
-
-/// Divide the polynomial `poly` by the monomial term `(X^degree + constant)`.
-/// Returns `(quotient, remainder)` such that `poly = quotient * (X^degree + constant) + remainder`.
-/// This is a generalized implementation of synthetic division and runs in O(deg(poly)) time.
-pub fn divide_by_monomial(
-    poly: &Poly<Scalar>,
-    degree: usize,
-    constant: &Scalar,
-) -> (Poly<Scalar>, Poly<Scalar>) {
-    let poly_degree = poly.degree() as usize;
-    // If degree of poly < divisor degree, quotient is 0, remainder is poly.
-    if poly_degree < degree {
-        return (Poly::from_coeffs(vec![Scalar::zero()]), poly.clone());
-    }
-
-    // Quotient will have degree (n - 1) - degree = n - 1 - degree.
-    // Size = n - degree.
-    let mut quotient = vec![Scalar::zero(); poly_degree + 1 - degree];
-    let mut remainder = poly.clone();
-
-    // Synthetic division from high degree to low
-    for i in (degree..poly_degree + 1).rev() {
-        let q = remainder[i];
-        quotient[i - degree] = q;
-
-        let term = &q * constant;
-        remainder[i - degree] -= &term;
-    }
-
-    // Truncate remainder to degree < degree (size degree).
-    remainder.truncate(degree);
-    // If remainder is empty (degree=0 case?), make it zero.
-    if remainder.is_empty() {
-        remainder.push(Scalar::zero());
-    }
-
-    (Poly::from_coeffs(quotient), Poly::from_coeffs(remainder))
-}
+use commonware_utils::vec::NonEmptyVec;
 
 // 1 at omega^i and 0 elsewhere on domain {omega^i}_{i \in [n]}
-// Computed by dividing X^n - 1 by X - omega^i
 pub fn lagrange_poly(n: usize, i: usize) -> Poly<Scalar> {
     debug_assert!(i < n);
+    //todo: check n is a power of 2
+    let mut evals = vec![];
+    for j in 0..n {
+        let l_of_x: u64 = if i == j { 1 } else { 0 };
+        evals.push(Scalar::from_u64(l_of_x));
+    }
 
-    let mut vanishing_poly = Poly::from_coeffs(vec![Scalar::zero(); n + 1]);
-    vanishing_poly[n] = Scalar::one();
+    //powers of nth root of unity
+    let settings = Settings::new(n.trailing_zeros() as usize).unwrap();
+    let coeffs = settings.fft(&evals, true).unwrap();
+    // coeffs.reverse();
 
-    // divide by monomial (X - omega^i)
+    Poly::from_coeffs(NonEmptyVec::from_unchecked(coeffs))
 }
 
 /// interpolates a polynomial which is zero on points and 1 at the point 0
 /// todo: use faster interpolation
-pub fn interp_mostly_zero<F: Field>(points: &Vec<F>) -> DensePolynomial<F> {
+pub fn interp_mostly_zero(points: &Vec<Scalar>) -> Poly<Scalar> {
     if points.is_empty() {
         // threshold=n
-        return DensePolynomial::from_coefficients_vec(vec![F::one()]);
+        return Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![Scalar::one()]));
     }
 
-    let mut interp = DensePolynomial::from_coefficients_vec(vec![F::one()]);
-    for &point in points {
-        interp = interp.naive_mul(&DensePolynomial::from_coefficients_vec(vec![
-            -point,
-            F::one(),
-        ]));
+    let mut interp = Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![Scalar::one()]));
+
+    for point in points {
+        interp = interp.poly_mul(&Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![
+            -point.clone(),
+            Scalar::one(),
+        ])));
     }
 
-    let scale = interp.evaluate(&F::zero());
-    interp = &interp * (F::one() / scale);
+    let scale = interp.eval(&Scalar::zero());
+    interp *= &(Scalar::one() * &scale.inv());
 
     interp
 }
-
+/*
 /// Computes all the openings of a KZG commitment in O(n log n) time
 /// See https://github.com/khovratovich/Kate/blob/master/Kate_amortized.pdf
 /// eprint version has a bug and hasn't been updated
@@ -141,21 +114,38 @@ pub fn open_all_values<E: Pairing>(
 
 //     res
 // }
-
+*/
 #[cfg(test)]
 mod tests {
-    use ark_bls12_381::Bls12_381;
-    use ark_ec::{bls12::Bls12, pairing::Pairing, VariableBaseMSM};
-    use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial, Polynomial};
-    use ark_std::{UniformRand, Zero};
+    use commonware_math::algebra::{Additive, Ring};
 
-    use crate::crs::CRS;
+    use crate::bls12381::{hints::fft_settings::Settings, primitives::group::Scalar};
 
-    use super::*;
-    type Fr = <Bls12<ark_bls12_381::Config> as Pairing>::ScalarField;
-    type G1 = <Bls12<ark_bls12_381::Config> as Pairing>::G1;
-    type E = Bls12_381;
+    use super::lagrange_poly;
 
+    #[test]
+    fn test_lagrange_poly() {
+        let n: usize = 8;
+        let settings = Settings::new(n.trailing_zeros() as usize).unwrap();
+        // Test lagrange polynomial at each point in the domain
+        for i in 0..n {
+            let poly = lagrange_poly(n, i);
+
+            // Evaluate polynomial at each point in domain
+            for j in 0..n {
+                let eval = poly.eval(&settings.expanded_roots_of_unity[j]);
+
+                // Lagrange polynomial should be 1 at omega^i and 0 elsewhere
+                if i == j {
+                    assert_eq!(eval, Scalar::one(), "L_{}(omega^{}) should be 1", i, j);
+                } else {
+                    assert_eq!(eval, Scalar::zero(), "L_{}(omega^{}) should be 0", i, j);
+                }
+            }
+        }
+    }
+
+    /*
     #[test]
     fn open_all_test() {
         let mut rng = ark_std::test_rng();
@@ -187,4 +177,5 @@ mod tests {
             assert_eq!(lhs, rhs);
         }
     }
+    */
 }
