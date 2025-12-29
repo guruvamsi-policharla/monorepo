@@ -20,7 +20,7 @@ const MIN_POINTS_FOR_MSM: usize = 2;
 #[derive(Clone)]
 pub struct Poly<K> {
     // Invariant: (1..=u32::MAX).contains(coeffs.len())
-    coeffs: NonEmptyVec<K>,
+    pub coeffs: NonEmptyVec<K>,
 }
 
 impl<K> Poly<K> {
