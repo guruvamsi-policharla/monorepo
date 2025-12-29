@@ -4,6 +4,7 @@ use commonware_math::algebra::{Additive, Field, Ring};
 use commonware_math::poly::Poly;
 use commonware_utils::vec::NonEmptyVec;
 
+/*
 /// Synthetic division of a polynomial 'poly' by X^a + b
 /// Returns (Quotient, Remainder)
 pub fn divide_by_monomial(
@@ -42,6 +43,7 @@ pub fn divide_by_monomial(
 
     (quotient, remainder)
 }
+    */
 
 // 1 at omega^i and 0 elsewhere on domain {omega^i}_{i \in [n]}
 pub fn lagrange_poly(n: usize, i: usize) -> Poly<Scalar> {
@@ -157,10 +159,7 @@ mod tests {
     use commonware_utils::vec::NonEmptyVec;
     use rand::thread_rng;
 
-    use crate::bls12381::{
-        hints::{fft_settings::Settings, utils::divide_by_monomial},
-        primitives::group::Scalar,
-    };
+    use crate::bls12381::{hints::fft_settings::Settings, primitives::group::Scalar};
 
     use super::lagrange_poly;
 
@@ -171,7 +170,7 @@ mod tests {
             Scalar::one(),
             Scalar::one(),
         ]));
-        let (quotient, remainder) = divide_by_monomial(&poly, 2, Scalar::one());
+        let (quotient, remainder) = poly.divide_by_monomial(2, Scalar::one());
         assert_eq!(
             quotient,
             Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![Scalar::zero(),]))
@@ -183,7 +182,7 @@ mod tests {
             Scalar::one(),
             Scalar::one(),
         ]));
-        let (quotient, remainder) = divide_by_monomial(&poly, 1, Scalar::one());
+        let (quotient, remainder) = poly.divide_by_monomial(1, Scalar::one());
         assert_eq!(
             quotient,
             Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![Scalar::one(),]))
@@ -198,7 +197,7 @@ mod tests {
             Scalar::one(),
             Scalar::one(),
         ]));
-        let (quotient, remainder) = divide_by_monomial(&poly, 1, Scalar::zero());
+        let (quotient, remainder) = poly.divide_by_monomial(1, Scalar::zero());
         assert_eq!(
             quotient,
             Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![Scalar::one(),]))
@@ -214,7 +213,7 @@ mod tests {
             Scalar::zero(),
             Scalar::one(),
         ]));
-        let (quotient, remainder) = divide_by_monomial(&poly, 1, -Scalar::one());
+        let (quotient, remainder) = poly.divide_by_monomial(1, -Scalar::one());
         assert_eq!(
             quotient,
             Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![

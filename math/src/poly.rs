@@ -168,6 +168,44 @@ impl<K> Poly<K> {
     }
 }
 
+impl<K: Clone + Additive + Ring> Poly<K> {
+    /// Synthetic division of a polynomial 'poly' by X^a + b
+    /// Returns (Quotient, Remainder)
+    pub fn divide_by_monomial(&self, a: usize, b: K) -> (Poly<K>, Poly<K>) {
+        let poly_degree = self.degree() as usize;
+        if poly_degree < a {
+            return (
+                Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![K::zero()])),
+                self.clone(),
+            );
+        }
+
+        // If poly.degree() >= a, we can perform synthetic division
+        let mut quotient = Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![
+            K::one();
+            (self.degree()
+                as usize)
+                - a
+                + 1
+        ]));
+        let mut remainder = self.clone();
+
+        while (remainder.degree() as usize) >= a {
+            let rem_degree = remainder.degree() as usize;
+
+            let leading_coeff = remainder.coeffs[rem_degree].clone();
+
+            remainder.coeffs =
+                NonEmptyVec::from_unchecked(remainder.coeffs[..=rem_degree - 1].to_vec());
+            remainder.coeffs[rem_degree - a] -= &(leading_coeff.clone() * &b);
+
+            quotient.coeffs[rem_degree - a] = leading_coeff;
+        }
+
+        (quotient, remainder)
+    }
+}
+
 impl<K: Debug> Debug for Poly<K> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "Poly(")?;

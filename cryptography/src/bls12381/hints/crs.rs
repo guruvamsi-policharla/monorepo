@@ -6,10 +6,7 @@ use commonware_utils::vec::NonEmptyVec;
 use rand::thread_rng;
 
 use crate::bls12381::{
-    hints::{
-        fft_settings::Settings,
-        utils::{divide_by_monomial, lagrange_poly},
-    },
+    hints::{fft_settings::Settings, utils::lagrange_poly},
     primitives::{group::Scalar, variant::Variant},
 };
 
@@ -178,7 +175,7 @@ impl<V: Variant> CRS<V> {
 
     pub fn compute_opening_proof(&self, coeffs: &[Scalar], point: &Scalar) -> V::Public {
         let polynomial = Poly::from_coeffs(NonEmptyVec::from_unchecked(coeffs.to_vec()));
-        let witness_polynomial = divide_by_monomial(&polynomial, 1, -point.clone()).0;
+        let witness_polynomial = polynomial.divide_by_monomial(1, -point.clone()).0;
 
         self.commit_public(&witness_polynomial.coeffs)
     }
@@ -186,7 +183,6 @@ impl<V: Variant> CRS<V> {
 
 #[cfg(test)]
 mod tests {
-    use crate::bls12381::hints::utils::divide_by_monomial;
     use commonware_math::{
         algebra::{Additive, CryptoGroup, Field, Random, Ring},
         poly::Poly,
@@ -263,7 +259,7 @@ mod tests {
         println!("b_poly deg: {}", b_poly.degree());
         println!("c_poly deg: {}", c_poly.degree());
 
-        let (qz, rem) = divide_by_monomial(&c_poly, n, -Scalar::one());
+        let (qz, rem) = c_poly.divide_by_monomial(n, -Scalar::one());
 
         println!("qz deg: {}", qz.degree());
         println!("rem deg: {}", rem.degree());
