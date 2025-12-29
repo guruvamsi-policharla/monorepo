@@ -1,10 +1,47 @@
-use std::ops::Mul;
-
 use crate::bls12381::hints::fft_settings::Settings;
 use crate::bls12381::primitives::group::{Scalar, G1};
 use commonware_math::algebra::{Additive, Field, Ring};
 use commonware_math::poly::Poly;
 use commonware_utils::vec::NonEmptyVec;
+
+/// Synthetic division of a polynomial 'poly' by X^a + b
+/// Returns (Quotient, Remainder)
+pub fn divide_by_monomial(
+    poly: &Poly<Scalar>,
+    a: usize,
+    b: Scalar,
+) -> (Poly<Scalar>, Poly<Scalar>) {
+    let poly_degree = poly.degree() as usize;
+    if poly_degree < a {
+        return (
+            Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![Scalar::zero()])),
+            poly.clone(),
+        );
+    }
+
+    // If poly.degree() >= a, we can perform synthetic division
+    let mut quotient = Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![
+        Scalar::one();
+        (poly.degree() as usize)
+            - a
+            + 1
+    ]));
+    let mut remainder = poly.clone();
+
+    while (remainder.degree() as usize) >= a {
+        let rem_degree = remainder.degree() as usize;
+
+        let leading_coeff = remainder.coeffs[rem_degree].clone();
+
+        remainder.coeffs =
+            NonEmptyVec::from_unchecked(remainder.coeffs[..=rem_degree - 1].to_vec());
+        remainder.coeffs[rem_degree - a] -= &(leading_coeff.clone() * &b);
+
+        quotient.coeffs[rem_degree - a] = leading_coeff;
+    }
+
+    (quotient, remainder)
+}
 
 // 1 at omega^i and 0 elsewhere on domain {omega^i}_{i \in [n]}
 pub fn lagrange_poly(n: usize, i: usize) -> Poly<Scalar> {
@@ -46,41 +83,37 @@ pub fn interp_mostly_zero(points: &Vec<Scalar>) -> Poly<Scalar> {
 
     interp
 }
-/*
+
 /// Computes all the openings of a KZG commitment in O(n log n) time
 /// See https://github.com/khovratovich/Kate/blob/master/Kate_amortized.pdf
 /// eprint version has a bug and hasn't been updated
-pub fn open_all_values<E: Pairing>(
-    y: &[E::G1Affine],
-    f: &[E::ScalarField],
-    domain: &Radix2EvaluationDomain<E::ScalarField>,
-) -> Vec<E::G1> {
-    let top_domain = Radix2EvaluationDomain::<E::ScalarField>::new(2 * domain.size()).unwrap();
+pub fn open_all_values(y: &[G1], f: &[Scalar], domain: &Settings) -> Vec<G1> {
+    let top_domain = Settings::new((2 * domain.max_width).trailing_zeros() as usize).unwrap();
 
     // use FK22 to get all the KZG proofs in O(nlog n) time =======================
     // f = {f0 ,f1, ..., fd}
     // v = {(d 0s), f1, ..., fd}
-    let mut v = vec![E::ScalarField::zero(); domain.size() + 1];
+    let mut v = vec![Scalar::zero(); domain.max_width + 1];
     v.append(&mut f[1..f.len()].to_vec());
 
-    debug_assert_eq!(v.len(), 2 * domain.size());
-    let v = top_domain.fft(&v);
+    debug_assert_eq!(v.len(), 2 * domain.max_width);
+    let v = top_domain.fft(&v, false).unwrap();
 
     // h = y \odot v
-    let mut h = vec![E::G1::zero(); 2 * domain.size()];
-    for i in 0..2 * domain.size() {
-        h[i] = y[i] * (v[i]);
+    let mut h = vec![G1::zero(); 2 * domain.max_width];
+    for i in 0..2 * domain.max_width {
+        h[i] = y[i] * &v[i];
     }
 
     // inverse fft on h
-    let mut h = top_domain.ifft(&h);
+    let mut h = top_domain.fft_g1(&h, true).unwrap();
 
-    h.truncate(domain.size());
+    h.truncate(domain.max_width);
 
     // fft on h to get KZG proofs
-    domain.fft(&h)
+    domain.fft_g1(&h, true).unwrap()
 }
-
+/*
 /// interpolates a polynomial where evaluations on points are zero and the polynomial evaluates to 1
 /// at the point 1 but relies on the number of points being a power of 2
 /// currently not used as this portion is not a bottleneck
@@ -117,11 +150,83 @@ pub fn open_all_values<E: Pairing>(
 */
 #[cfg(test)]
 mod tests {
-    use commonware_math::algebra::{Additive, Ring};
+    use commonware_math::{
+        algebra::{Additive, Random, Ring},
+        poly::Poly,
+    };
+    use commonware_utils::vec::NonEmptyVec;
+    use rand::thread_rng;
 
-    use crate::bls12381::{hints::fft_settings::Settings, primitives::group::Scalar};
+    use crate::bls12381::{
+        hints::{fft_settings::Settings, utils::divide_by_monomial},
+        primitives::group::Scalar,
+    };
 
     use super::lagrange_poly;
+
+    #[test]
+    fn test_monomial_div() {
+        // (X + 1) / (X^2 + 1)
+        let poly = Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![
+            Scalar::one(),
+            Scalar::one(),
+        ]));
+        let (quotient, remainder) = divide_by_monomial(&poly, 2, Scalar::one());
+        assert_eq!(
+            quotient,
+            Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![Scalar::zero(),]))
+        );
+        assert_eq!(remainder, poly);
+
+        // (X + 1) / (X + 1)
+        let poly = Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![
+            Scalar::one(),
+            Scalar::one(),
+        ]));
+        let (quotient, remainder) = divide_by_monomial(&poly, 1, Scalar::one());
+        assert_eq!(
+            quotient,
+            Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![Scalar::one(),]))
+        );
+        assert_eq!(
+            remainder,
+            Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![Scalar::zero(),]))
+        );
+
+        // (X + 1) / (X)
+        let poly = Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![
+            Scalar::one(),
+            Scalar::one(),
+        ]));
+        let (quotient, remainder) = divide_by_monomial(&poly, 1, Scalar::zero());
+        assert_eq!(
+            quotient,
+            Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![Scalar::one(),]))
+        );
+        assert_eq!(
+            remainder,
+            Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![Scalar::one(),]))
+        );
+
+        // (X^2 - 1) / (X - 1)
+        let poly = Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![
+            -Scalar::one(),
+            Scalar::zero(),
+            Scalar::one(),
+        ]));
+        let (quotient, remainder) = divide_by_monomial(&poly, 1, -Scalar::one());
+        assert_eq!(
+            quotient,
+            Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![
+                Scalar::one(),
+                Scalar::one()
+            ]))
+        );
+        assert_eq!(
+            remainder,
+            Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![Scalar::zero(),]))
+        );
+    }
 
     #[test]
     fn test_lagrange_poly() {
@@ -148,10 +253,8 @@ mod tests {
     /*
     #[test]
     fn open_all_test() {
-        let mut rng = ark_std::test_rng();
-
         let n = 1 << 8;
-        let domain = Radix2EvaluationDomain::<Fr>::new(n).unwrap();
+        let domain = Settings::new(n.trailing_zeros() as usize).unwrap();
         let crs = CRS::<E>::new(n, &mut ark_std::test_rng());
 
         let mut f: Vec<ark_ff::Fp<ark_ff::MontBackend<ark_bls12_381::FrConfig, 4>, 4>> =
