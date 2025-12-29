@@ -153,13 +153,20 @@ pub fn open_all_values(y: &[G1], f: &[Scalar], domain: &Settings) -> Vec<G1> {
 #[cfg(test)]
 mod tests {
     use commonware_math::{
-        algebra::{Additive, Random, Ring},
+        algebra::{Additive, Random, Ring, Space},
         poly::Poly,
     };
+
     use commonware_utils::vec::NonEmptyVec;
     use rand::thread_rng;
 
-    use crate::bls12381::{hints::fft_settings::Settings, primitives::group::Scalar};
+    use crate::bls12381::{
+        hints::{crs::CRS, fft_settings::Settings, utils::open_all_values},
+        primitives::{
+            group::Scalar,
+            variant::{self, MinPk, Variant},
+        },
+    };
 
     use super::lagrange_poly;
 
@@ -249,35 +256,36 @@ mod tests {
         }
     }
 
-    /*
     #[test]
     fn open_all_test() {
-        let n = 1 << 8;
+        let n: usize = 1 << 8;
         let domain = Settings::new(n.trailing_zeros() as usize).unwrap();
-        let crs = CRS::<E>::new(n, &mut ark_std::test_rng());
+        let crs = CRS::<MinPk>::new(n);
 
-        let mut f: Vec<ark_ff::Fp<ark_ff::MontBackend<ark_bls12_381::FrConfig, 4>, 4>> =
-            vec![Fr::zero(); n];
+        let mut f = vec![Scalar::zero(); n];
         for i in 0..n {
-            f[i] = Fr::rand(&mut rng);
+            f[i] = Scalar::random(&mut thread_rng());
         }
 
-        let com = G1::msm(&crs.powers_of_g[0..f.len()], &f).unwrap();
+        let com =
+            <variant::MinPk as variant::Variant>::Public::msm(&crs.powers_of_g[0..f.len()], &f, 1);
 
         let timer = std::time::Instant::now();
-        let pi = open_all_values::<E>(&crs.y, &f, &domain);
+        let pi = open_all_values(&crs.y, &f, &domain);
         println!("open_all_values took {:?}", timer.elapsed());
 
         // verify the kzg proof
         let g = crs.powers_of_g[0];
         let h = crs.powers_of_h[0];
 
-        let fpoly = DensePolynomial::from_coefficients_vec(f.clone());
+        let fpoly = Poly::from_coeffs(NonEmptyVec::from_unchecked(f.clone()));
         for i in 0..n {
-            let lhs = E::pairing(com - (g * fpoly.evaluate(&domain.element(i))), h);
-            let rhs = E::pairing(pi[i], crs.powers_of_h[1] - (h * domain.element(i)));
+            let lhs = MinPk::pairing(&(com - &(g * &fpoly.eval(&domain.roots_of_unity[i]))), &h);
+            let rhs = MinPk::pairing(
+                &pi[i],
+                &(crs.powers_of_h[1] - &(h * &domain.roots_of_unity[i])),
+            );
             assert_eq!(lhs, rhs);
         }
     }
-    */
 }
