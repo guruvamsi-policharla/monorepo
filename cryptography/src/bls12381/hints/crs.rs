@@ -1,9 +1,8 @@
 use commonware_math::{
-    algebra::{Additive, CryptoGroup, Field, Random, Ring, Space},
+    algebra::{Additive, CryptoGroup, Field, Ring, Space},
     poly::Poly,
 };
 use commonware_utils::vec::NonEmptyVec;
-use rand::thread_rng;
 
 use crate::bls12381::{
     hints::{fft_settings::Settings, utils::lagrange_poly},
@@ -34,7 +33,8 @@ pub struct CRS<V: Variant> {
 
 impl<V: Variant> CRS<V> {
     pub fn new(n: usize) -> Self {
-        let tau = Scalar::random(&mut thread_rng());
+        // let tau = Scalar::random(&mut thread_rng());
+        let tau = Scalar::from_u64(2);
         Self::deterministic_new(n, tau)
     }
 
@@ -124,7 +124,7 @@ impl<V: Variant> CRS<V> {
         top_tau.resize(2 * n, Scalar::zero());
 
         let top_domain = Settings::new((2 * n).trailing_zeros() as usize).unwrap();
-        let top_tau = top_domain.fft(&top_tau, true).unwrap();
+        let top_tau = top_domain.fft(&top_tau, false).unwrap();
 
         // Compute powers of top_tau
         let y = top_tau

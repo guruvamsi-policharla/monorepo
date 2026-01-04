@@ -1,49 +1,8 @@
 use crate::bls12381::hints::fft_settings::Settings;
-use crate::bls12381::primitives::group::{Scalar, G1};
+use crate::bls12381::primitives::group::Scalar;
 use commonware_math::algebra::{Additive, Field, Ring};
 use commonware_math::poly::Poly;
 use commonware_utils::vec::NonEmptyVec;
-
-/*
-/// Synthetic division of a polynomial 'poly' by X^a + b
-/// Returns (Quotient, Remainder)
-pub fn divide_by_monomial(
-    poly: &Poly<Scalar>,
-    a: usize,
-    b: Scalar,
-) -> (Poly<Scalar>, Poly<Scalar>) {
-    let poly_degree = poly.degree() as usize;
-    if poly_degree < a {
-        return (
-            Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![Scalar::zero()])),
-            poly.clone(),
-        );
-    }
-
-    // If poly.degree() >= a, we can perform synthetic division
-    let mut quotient = Poly::from_coeffs(NonEmptyVec::from_unchecked(vec![
-        Scalar::one();
-        (poly.degree() as usize)
-            - a
-            + 1
-    ]));
-    let mut remainder = poly.clone();
-
-    while (remainder.degree() as usize) >= a {
-        let rem_degree = remainder.degree() as usize;
-
-        let leading_coeff = remainder.coeffs[rem_degree].clone();
-
-        remainder.coeffs =
-            NonEmptyVec::from_unchecked(remainder.coeffs[..=rem_degree - 1].to_vec());
-        remainder.coeffs[rem_degree - a] -= &(leading_coeff.clone() * &b);
-
-        quotient.coeffs[rem_degree - a] = leading_coeff;
-    }
-
-    (quotient, remainder)
-}
-    */
 
 // 1 at omega^i and 0 elsewhere on domain {omega^i}_{i \in [n]}
 pub fn lagrange_poly(n: usize, i: usize) -> Poly<Scalar> {
@@ -86,35 +45,37 @@ pub fn interp_mostly_zero(points: &Vec<Scalar>) -> Poly<Scalar> {
     interp
 }
 
-/// Computes all the openings of a KZG commitment in O(n log n) time
-/// See https://github.com/khovratovich/Kate/blob/master/Kate_amortized.pdf
-/// eprint version has a bug and hasn't been updated
-pub fn open_all_values(y: &[G1], f: &[Scalar], domain: &Settings) -> Vec<G1> {
-    let top_domain = Settings::new((2 * domain.max_width).trailing_zeros() as usize).unwrap();
+// /// Computes all the openings of a KZG commitment in O(n log n) time
+// /// See https://github.com/khovratovich/Kate/blob/master/Kate_amortized.pdf
+// /// eprint version has a bug and hasn't been updated
+// pub fn open_all_values(y: &[G1], f: &[Scalar], domain: &Settings) -> Vec<G1> {
+//     let top_domain = Settings::new((2 * domain.max_width).trailing_zeros() as usize).unwrap();
 
-    // use FK22 to get all the KZG proofs in O(nlog n) time =======================
-    // f = {f0 ,f1, ..., fd}
-    // v = {(d 0s), f1, ..., fd}
-    let mut v = vec![Scalar::zero(); domain.max_width + 1];
-    v.append(&mut f[1..f.len()].to_vec());
+//     // use FK22 to get all the KZG proofs in O(nlog n) time =======================
+//     // f = {f0 ,f1, ..., fd}
+//     // v = {(d 0s), f1, ..., fd}
+//     let mut v = vec![Scalar::zero(); domain.max_width + 1];
+//     v.append(&mut f[1..f.len()].to_vec());
 
-    debug_assert_eq!(v.len(), 2 * domain.max_width);
-    let v = top_domain.fft(&v, false).unwrap();
+//     debug_assert_eq!(v.len(), 2 * domain.max_width);
+//     let v = top_domain.fft(&v, false).unwrap();
 
-    // h = y \odot v
-    let mut h = vec![G1::zero(); 2 * domain.max_width];
-    for i in 0..2 * domain.max_width {
-        h[i] = y[i] * &v[i];
-    }
+//     // h = y \odot v
+//     let mut h = vec![G1::zero(); 2 * domain.max_width];
+//     for i in 0..2 * domain.max_width {
+//         h[i] = y[i] * &v[i];
+//     }
 
-    // inverse fft on h
-    let mut h = top_domain.fft_g1(&h, true).unwrap();
+//     // inverse fft on h
+//     let mut h = top_domain.fft_g1(&h, true).unwrap();
+//     h.truncate(domain.max_width);
 
-    h.truncate(domain.max_width);
+//     // fft on h to get KZG proofs
+//     let pi = domain.fft_g1(&h, false).unwrap();
 
-    // fft on h to get KZG proofs
-    domain.fft_g1(&h, true).unwrap()
-}
+//     pi
+// }
+
 /*
 /// interpolates a polynomial where evaluations on points are zero and the polynomial evaluates to 1
 /// at the point 1 but relies on the number of points being a power of 2
@@ -161,7 +122,7 @@ mod tests {
     use rand::thread_rng;
 
     use crate::bls12381::{
-        hints::{crs::CRS, fft_settings::Settings, utils::open_all_values},
+        hints::{crs::CRS, fft_settings::Settings},
         primitives::{
             group::Scalar,
             variant::{self, MinPk, Variant},
@@ -256,36 +217,37 @@ mod tests {
         }
     }
 
-    #[test]
-    fn open_all_test() {
-        let n: usize = 1 << 8;
-        let domain = Settings::new(n.trailing_zeros() as usize).unwrap();
-        let crs = CRS::<MinPk>::new(n);
+    // #[test]
+    // fn open_all_test() {
+    //     let n: usize = 1 << 2;
+    //     let domain = Settings::new(n.trailing_zeros() as usize).unwrap();
+    //     let crs = CRS::<MinPk>::new(n);
 
-        let mut f = vec![Scalar::zero(); n];
-        for i in 0..n {
-            f[i] = Scalar::random(&mut thread_rng());
-        }
+    //     let mut f = vec![Scalar::zero(); n];
+    //     for i in 0..n {
+    //         // f[i] = Scalar::random(&mut thread_rng());
+    //         f[i] = Scalar::one();
+    //     }
 
-        let com =
-            <variant::MinPk as variant::Variant>::Public::msm(&crs.powers_of_g[0..f.len()], &f, 1);
+    //     let com =
+    //         <variant::MinPk as variant::Variant>::Public::msm(&crs.powers_of_g[0..f.len()], &f, 1);
 
-        let timer = std::time::Instant::now();
-        let pi = open_all_values(&crs.y, &f, &domain);
-        println!("open_all_values took {:?}", timer.elapsed());
+    //     let timer = std::time::Instant::now();
+    //     let pi = open_all_values(&crs.y, &f, &domain);
+    //     println!("open_all_values took {:?}", timer.elapsed());
 
-        // verify the kzg proof
-        let g = crs.powers_of_g[0];
-        let h = crs.powers_of_h[0];
+    //     // verify the kzg proof
+    //     let g = crs.powers_of_g[0];
+    //     let h = crs.powers_of_h[0];
 
-        let fpoly = Poly::from_coeffs(NonEmptyVec::from_unchecked(f.clone()));
-        for i in 0..n {
-            let lhs = MinPk::pairing(&(com - &(g * &fpoly.eval(&domain.roots_of_unity[i]))), &h);
-            let rhs = MinPk::pairing(
-                &pi[i],
-                &(crs.powers_of_h[1] - &(h * &domain.roots_of_unity[i])),
-            );
-            assert_eq!(lhs, rhs);
-        }
-    }
+    //     let fpoly = Poly::from_coeffs(NonEmptyVec::from_unchecked(f.clone()));
+    //     for i in 0..n {
+    //         let lhs = MinPk::pairing(&(com - &(g * &fpoly.eval(&domain.roots_of_unity[i]))), &h);
+    //         let rhs = MinPk::pairing(
+    //             &pi[i],
+    //             &(crs.powers_of_h[1] - &(h * &domain.roots_of_unity[i])),
+    //         );
+    //         assert_eq!(lhs, rhs);
+    //     }
+    // }
 }

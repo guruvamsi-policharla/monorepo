@@ -1,49 +1,46 @@
-use crate::{
-    crs::CRS,
-    setup::{LagPolys, LagPublicKey, PublicKey},
-    utils::{ark_de, ark_se},
-};
-use ark_ec::pairing::{Pairing, PairingOutput};
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use ark_std::{end_timer, start_timer, One, Zero};
+use commonware_math::algebra::{Additive, Ring};
 use hopcroft_karp::matching;
 use rand::{Rng, SeedableRng};
-use serde::{Deserialize, Serialize};
 
-#[derive(CanonicalSerialize, CanonicalDeserialize, Serialize, Deserialize, Clone)]
-pub struct EncryptionKey<E: Pairing> {
-    #[serde(serialize_with = "ark_se", deserialize_with = "ark_de")]
-    pub ask: E::G1,
-    #[serde(serialize_with = "ark_se", deserialize_with = "ark_de")]
-    pub z_g2: E::G2,
-    #[serde(serialize_with = "ark_se", deserialize_with = "ark_de")]
-    pub e_gh: PairingOutput<E>,
+use crate::bls12381::{
+    hints::{crs::CRS, setup::LagPolys},
+    primitives::{
+        group::{Scalar, GT},
+        variant::Variant,
+    },
+};
+
+use super::setup::{LagPublicKey, PublicKey};
+
+#[derive(Clone)]
+pub struct EncryptionKey<V: Variant> {
+    pub ask: V::Public,
+    pub z_g2: V::Signature,
+    pub e_gh: GT,
 }
 
-#[derive(CanonicalSerialize, CanonicalDeserialize, Serialize, Deserialize, Clone)]
-pub struct AggregateKey<E: Pairing> {
-    #[serde(serialize_with = "ark_se", deserialize_with = "ark_de")]
-    pub lag_pks: Vec<LagPublicKey<E>>,
-    #[serde(serialize_with = "ark_se", deserialize_with = "ark_de")]
-    pub agg_sk_li_lj_z: Vec<E::G1>,
+#[derive(Clone)]
+pub struct AggregateKey<V: Variant> {
+    pub lag_pks: Vec<LagPublicKey<V>>,
+    pub agg_sk_li_lj_z: Vec<V::Public>,
 }
 
-impl<E: Pairing> AggregateKey<E> {
-    pub fn new(lag_pks: Vec<LagPublicKey<E>>, crs: &CRS<E>) -> (Self, EncryptionKey<E>) {
+impl<V: Variant> AggregateKey<V> {
+    pub fn new(lag_pks: Vec<LagPublicKey<V>>, crs: &CRS<V>) -> (Self, EncryptionKey<V>) {
         let n = lag_pks.len();
-        let z_g2 = crs.powers_of_h[n] + crs.powers_of_h[0] * (-E::ScalarField::one());
+        let z_g2 = crs.powers_of_h[n] + &(crs.powers_of_h[0] * &(-Scalar::one()));
 
         // gather sk_li from all public keys
-        let mut ask = E::G1::zero();
+        let mut ask = V::Public::zero();
         for pki in lag_pks.iter() {
-            ask += pki.sk_li;
+            ask += &pki.sk_li;
         }
 
         let mut agg_sk_li_lj_z = vec![];
         for i in 0..n {
-            let mut agg_sk_li_lj_zi = E::G1::zero();
+            let mut agg_sk_li_lj_zi = V::Public::zero();
             for pkj in lag_pks.iter() {
-                agg_sk_li_lj_zi += pkj.sk_li_lj_z[i];
+                agg_sk_li_lj_zi += &pkj.sk_li_lj_z[i];
             }
             agg_sk_li_lj_z.push(agg_sk_li_lj_zi);
         }
@@ -56,7 +53,7 @@ impl<E: Pairing> AggregateKey<E> {
             EncryptionKey {
                 ask,
                 z_g2,
-                e_gh: E::pairing(crs.powers_of_g[0], crs.powers_of_h[0]),
+                e_gh: V::pairing(&crs.powers_of_g[0], &crs.powers_of_h[0]),
             },
         )
     }
@@ -66,23 +63,16 @@ impl<E: Pairing> AggregateKey<E> {
 /// also maintains lagrange public keys for each party at k "random" positions
 /// this ensures that the public keys of any subset of n parties forms an "almost" perfect matching
 /// hence, allowing for efficient aggregation and decryption
-#[derive(CanonicalSerialize, CanonicalDeserialize, Serialize, Deserialize, Clone)]
-pub struct SystemPublicKeys<E: Pairing> {
+#[derive(Clone)]
+pub struct SystemPublicKeys<V: Variant> {
     pub m: usize,
     pub k: usize,
-    #[serde(serialize_with = "ark_se", deserialize_with = "ark_de")]
-    pub pks: Vec<PublicKey<E>>,
-    #[serde(serialize_with = "ark_se", deserialize_with = "ark_de")]
-    pub lag_pks: Vec<Vec<LagPublicKey<E>>>,
+    pub pks: Vec<PublicKey<V>>,
+    pub lag_pks: Vec<Vec<LagPublicKey<V>>>,
 }
 
-impl<E: Pairing> SystemPublicKeys<E> {
-    pub fn new(
-        pks: Vec<PublicKey<E>>,
-        crs: &CRS<E>,
-        lag_polys: &LagPolys<E::ScalarField>,
-        k: usize,
-    ) -> Self {
+impl<V: Variant> SystemPublicKeys<V> {
+    pub fn new(pks: Vec<PublicKey<V>>, crs: &CRS<V>, lag_polys: &LagPolys, k: usize) -> Self {
         // using a deterministic seed for reproducibility across machines
         // can derandomize using a random oracle
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
@@ -95,7 +85,7 @@ impl<E: Pairing> SystemPublicKeys<E> {
             let mut row = vec![];
             let mut sampled = vec![];
             while sampled.len() < k {
-                let value = rng.random_range(0..crs.n);
+                let value = rng.gen_range(0..crs.n);
                 // ensure that the sampled value is unique
                 if !sampled.contains(&value) {
                     sampled.push(value);
@@ -113,21 +103,39 @@ impl<E: Pairing> SystemPublicKeys<E> {
             }
         }
 
+        #[cfg(feature = "std")]
         use rayon::prelude::*;
 
-        let timer = start_timer!(|| "Setup System Public Keys");
         let mut lag_pks = vec![vec![]; m];
-        lag_pks
-            .par_iter_mut()
-            .enumerate()
-            .for_each(|(i, lag_pk_i)| {
+
+        #[cfg(feature = "std")]
+        {
+            lag_pks
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(i, lag_pk_i)| {
+                    let mut lag_pk_inner = vec![];
+                    for j in 0..k {
+                        lag_pk_inner.push(pks[i].get_lag_public_key(
+                            positions[i][j],
+                            crs,
+                            lag_polys,
+                        ));
+                    }
+                    *lag_pk_i = lag_pk_inner;
+                });
+        }
+
+        #[cfg(not(feature = "std"))]
+        {
+            for (i, lag_pk_i) in lag_pks.iter_mut().enumerate() {
                 let mut lag_pk_inner = vec![];
                 for j in 0..k {
                     lag_pk_inner.push(pks[i].get_lag_public_key(positions[i][j], crs, lag_polys));
                 }
                 *lag_pk_i = lag_pk_inner;
-            });
-        end_timer!(timer);
+            }
+        }
 
         Self { m, k, pks, lag_pks }
     }
@@ -135,9 +143,9 @@ impl<E: Pairing> SystemPublicKeys<E> {
     pub fn get_aggregate_key(
         &self,
         set: &Vec<usize>, // subset of indexes to encrypt to
-        crs: &CRS<E>,
-        lag_polys: &LagPolys<E::ScalarField>,
-    ) -> (AggregateKey<E>, EncryptionKey<E>) {
+        crs: &CRS<V>,
+        lag_polys: &LagPolys,
+    ) -> (AggregateKey<V>, EncryptionKey<V>) {
         // find the maximum matching between lag_public keys and positions
         let mut edges = vec![];
         for &node in set {
@@ -206,32 +214,46 @@ impl<E: Pairing> SystemPublicKeys<E> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::setup::SecretKey;
-    use hopcroft_karp::matching;
-
-    type E = ark_bls12_381::Bls12_381;
-    type F = ark_bls12_381::Fr;
+    use crate::bls12381::{hints::setup::SecretKey, primitives::variant::MinPk};
 
     #[test]
     fn setup_system_public_keys() {
-        let n = 1 << 7;
-        let m = 1 << 10;
-        let crs = CRS::<E>::new(n, &mut ark_std::test_rng());
-        let lag_polys = LagPolys::<F>::new(n);
+        let n = 1 << 4;
+        let m = 1 << 6;
+        let crs = CRS::<MinPk>::new(n);
+        let lag_polys = LagPolys::new(n);
+
+        #[cfg(feature = "std")]
         use rayon::prelude::*;
 
-        let timer = start_timer!(|| "Setup Public Keys");
-        let (_sk, pk): (Vec<_>, Vec<_>) = (0..m)
-            .into_par_iter()
-            .map(|i| {
-                let sk = SecretKey::<E>::new(&mut ark_std::test_rng(), i);
-                let pk = sk.get_pk(&crs);
-                (sk, pk)
-            })
-            .unzip();
-        end_timer!(timer);
+        let mut sk = vec![];
+        let mut pk = vec![];
 
-        let _system_keys = SystemPublicKeys::<E>::new(pk.clone(), &crs, &lag_polys, 3);
+        #[cfg(feature = "std")]
+        {
+            let (sk_temp, pk_temp): (Vec<_>, Vec<_>) = (0..m)
+                .into_par_iter()
+                .map(|i| {
+                    let sk = SecretKey::new(i);
+                    let pk = sk.get_pk(&crs);
+                    (sk, pk)
+                })
+                .unzip();
+            sk = sk_temp;
+            pk = pk_temp;
+        }
+
+        #[cfg(not(feature = "std"))]
+        {
+            for i in 0..m {
+                let sk_i = SecretKey::new(i);
+                let pk_i = sk_i.get_pk(&crs);
+                sk.push(sk_i);
+                pk.push(pk_i);
+            }
+        }
+
+        let _system_keys = SystemPublicKeys::<MinPk>::new(pk.clone(), &crs, &lag_polys, 3);
     }
 
     #[test]
@@ -243,13 +265,13 @@ mod tests {
         for _ in 0..RUNS {
             let nodes = (0..N).collect::<Vec<_>>();
             // for each node, assign a tuple with K random values from the range 0..128
-            let mut rng = rand::rng();
+            let mut rng = rand::thread_rng();
             let mut positions = vec![];
             for _ in 0..N {
                 let mut row = vec![];
                 let mut sampled = vec![];
                 while sampled.len() < K {
-                    let value = rng.random_range(N..2 * N);
+                    let value = rng.gen_range(N..2 * N);
                     if !sampled.contains(&value) {
                         sampled.push(value);
                     }
@@ -294,7 +316,6 @@ mod tests {
             }
 
             println!("Matching Size: {}/{}", res.len(), N);
-            println!("Matching: {:?}", res);
         }
     }
 }

@@ -66,4 +66,26 @@ mod tests {
     fn compare_fft_g1_() {
         compare_fft_g1(&fft_g1_slow);
     }
+
+    #[test]
+    fn compare_fft_g1_fft_fr() {
+        let size: usize = 2;
+        let settings = Settings::new(size).unwrap();
+
+        let fr_data = (0..settings.max_width)
+            .map(|i| Scalar::from_u64((i as u64) + 1))
+            .collect::<Vec<_>>();
+
+        let data = (0..settings.max_width)
+            .map(|i| G1::generator().mul(&Scalar::from_u64((i as u64) + 1)))
+            .collect::<Vec<_>>();
+
+        let out_fr = settings.fft(&fr_data, true).unwrap();
+        println!("FFT: {:?}", out_fr);
+        let out_g1 = settings.fft_g1(&data, true).unwrap();
+
+        for i in 0..settings.max_width {
+            assert_eq!(out_g1[i], G1::generator() * &out_fr[i]);
+        }
+    }
 }

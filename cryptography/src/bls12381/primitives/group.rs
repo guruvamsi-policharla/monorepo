@@ -14,12 +14,12 @@ use super::variant::Variant;
 #[cfg(not(feature = "std"))]
 use alloc::{vec, vec::Vec};
 use blst::{
-    blst_bendian_from_fp12, blst_bendian_from_scalar, blst_expand_message_xmd, blst_fp12, blst_fr,
-    blst_fr_add, blst_fr_cneg, blst_fr_from_scalar, blst_fr_from_uint64, blst_fr_inverse,
-    blst_fr_mul, blst_fr_sub, blst_hash_to_g1, blst_hash_to_g2, blst_keygen, blst_p1,
-    blst_p1_add_or_double, blst_p1_affine, blst_p1_cneg, blst_p1_compress, blst_p1_from_affine,
-    blst_p1_in_g1, blst_p1_is_inf, blst_p1_mult, blst_p1_to_affine, blst_p1_uncompress,
-    blst_p1s_mult_pippenger, blst_p1s_mult_pippenger_scratch_sizeof, blst_p2,
+    blst_bendian_from_fp12, blst_bendian_from_scalar, blst_expand_message_xmd, blst_fp12,
+    blst_fp12_mul, blst_fr, blst_fr_add, blst_fr_cneg, blst_fr_from_scalar, blst_fr_from_uint64,
+    blst_fr_inverse, blst_fr_mul, blst_fr_sub, blst_hash_to_g1, blst_hash_to_g2, blst_keygen,
+    blst_p1, blst_p1_add_or_double, blst_p1_affine, blst_p1_cneg, blst_p1_compress,
+    blst_p1_from_affine, blst_p1_in_g1, blst_p1_is_inf, blst_p1_mult, blst_p1_to_affine,
+    blst_p1_uncompress, blst_p1s_mult_pippenger, blst_p1s_mult_pippenger_scratch_sizeof, blst_p2,
     blst_p2_add_or_double, blst_p2_affine, blst_p2_cneg, blst_p2_compress, blst_p2_from_affine,
     blst_p2_in_g2, blst_p2_is_inf, blst_p2_mult, blst_p2_to_affine, blst_p2_uncompress,
     blst_p2s_mult_pippenger, blst_p2s_mult_pippenger_scratch_sizeof, blst_scalar,
@@ -203,6 +203,25 @@ impl GT {
             blst_bendian_from_fp12(slice.as_mut_ptr(), &self.0);
         }
         slice
+    }
+}
+
+impl<'a> MulAssign<&'a Self> for GT {
+    fn mul_assign(&mut self, rhs: &'a Self) {
+        let ptr = &raw mut self.0;
+        // SAFETY: blst_fp12_mul supports in-place (ret==a). Raw pointer avoids aliased refs.
+        unsafe {
+            blst_fp12_mul(ptr, ptr, &rhs.0);
+        }
+    }
+}
+
+impl<'a> Mul<&'a Self> for GT {
+    type Output = Self;
+
+    fn mul(mut self, rhs: &'a Self) -> Self::Output {
+        self *= rhs;
+        self
     }
 }
 
